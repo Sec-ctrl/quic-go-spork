@@ -277,6 +277,9 @@ func (s *sendStream) popNewOrRetransmittedStreamFrame(maxBytes protocol.ByteCoun
 	}
 
 	f, hasMoreData := s.popNewStreamFrame(maxBytes, sendWindow, v)
+	if f == nil {
+		return nil, hasMoreData, false
+	}
 	if dataLen := f.DataLen(); dataLen > 0 {
 		s.writeOffset += f.DataLen()
 		s.flowController.AddBytesSent(f.DataLen())
@@ -290,10 +293,12 @@ func (s *sendStream) popNewOrRetransmittedStreamFrame(maxBytes protocol.ByteCoun
 
 func (s *sendStream) popNewStreamFrame(maxBytes, sendWindow protocol.ByteCount, v protocol.Version) (*wire.StreamFrame, bool) {
 	if s.nextFrame != nil {
+		maxDataLen := min(sendWindow, s.nextFrame.MaxDataLen(maxBytes, v))
+		if maxDataLen == 0 {
+			return nil, true
+		}
 		nextFrame := s.nextFrame
 		s.nextFrame = nil
-
-		maxDataLen := min(sendWindow, nextFrame.MaxDataLen(maxBytes, v))
 		if nextFrame.DataLen() > maxDataLen {
 			s.nextFrame = wire.GetStreamFrame()
 			s.nextFrame.StreamID = s.streamID
@@ -393,7 +398,7 @@ func (s *sendStream) isNewlyCompleted() bool {
 
 func (s *sendStream) Close() error {
 	s.mutex.Lock()
-	if s.closeForShutdownErr != nil {
+	if s.closeForShutdownErr != nil || s.finishedWriting {
 		s.mutex.Unlock()
 		return nil
 	}
@@ -592,6 +597,7 @@ func (s *sendStreamResetStreamHandler) OnAcked(wire.Frame) {
 func (s *sendStreamResetStreamHandler) OnLost(wire.Frame) {
 	s.mutex.Lock()
 	s.queuedResetStreamFrame = true
+	s.numOutstandingFrames--
 	s.mutex.Unlock()
 	s.sender.onHasStreamControlFrame(s.streamID, (*sendStream)(s))
 }
