@@ -206,6 +206,12 @@ type connection struct {
 	logID  string
 	tracer *logging.ConnectionTracer
 	logger utils.Logger
+
+	bandwidthEstimator BandwidthEstimator
+}
+
+func (c *connection) GetBandwidthEstimator() BandwidthEstimator {
+	return c.bandwidthEstimator
 }
 
 var (
